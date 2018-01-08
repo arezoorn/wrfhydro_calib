@@ -245,11 +245,11 @@ while read line; do
       done # done param list
 
       # Edit run script
-      sed -i.bak "9s/.*/#BSUB -J calib${runid}      # job name/" run.csh
+      sed -i.bak "3s/.*/#BSUB -J calib${runid}/" run.csh
       sed -i.bak "22s/.*/set outFolder=..\/SENS_RESULTS\/OUTPUT${runid}/" run.csh
 
       # Run
-      bsub -K < run.csh &
+      qsub run.csh &
       cd ..
 
   fi
