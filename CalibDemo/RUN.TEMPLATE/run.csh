@@ -1,18 +1,18 @@
 #!/bin/csh
-#
-# LSF batch script to run the test MPI code
-#
-#BSUB -P NRAL0017                       # Project 99999999
-#BSUB -x                                # exclusive use of node (not_shared)
-#BSUB -n 16                      # number of total (MPI) tasks
-#BSUB -R "span[ptile=16]"               # run a max of  tasks per node
-#BSUB -J demo_calib      # job name
-#BSUB -o wrf%J.out                      # output filename
-#BSUB -e wrf%J.err                      # error filename
-#BSUB -W 2:00                           # wallclock time
-#BSUB -q premium                        # queue
 
-mpirun.lsf ./wrf_hydro.exe
+#PBS -N matthew_full_model_run
+#PBS -A NRAL0017
+#PBS -l walltime=06:00:00
+#PBS -q regular
+#PBS -j oe
+#PBS -m abe
+#PBS -M arezoo@ucar.edu
+#PBS -l select=1:ncpus=36:mpiprocs=36
+
+
+### Run the executable
+mpiexec_mpt ./wrf_hydro.exe #> stdErrorOut
+
 echo $?
 
 set writeout=1
@@ -53,4 +53,3 @@ mv *LAKEOUT* $outFolder/.
 endif
 
 exit 0
-
