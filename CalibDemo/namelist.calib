@@ -1,7 +1,7 @@
 #### Model Parameters ####
 
 # Model run directory
-runDir <- "/glade/scratch/adugger/CONUS_CALIB/CalibDemo/"
+runDir <- "/glade/scratch/arezoo/SA/wrfhydro_calib/CalibDemo"
 
 # Route link file
 rtlinkFile <- paste0(runDir, "/RUN.TEMPLATE/DOMAIN/RouteLink.nc")
@@ -24,7 +24,7 @@ paramBnds <- read.table(paste0(runDir, "/param_bnds.txt"), header=TRUE, sep=" ",
 #### Model Evaluation Parameters ####
 
 # Gage ID to extract from the model output and compare against the obs
-siteId <- "02245500"
+siteId <- "04233300"
 
 # R dataset containing observations
 # Must contain an object called obsDf containing columns:
@@ -64,3 +64,9 @@ archiveOutput <- FALSE
 # Archive model run files?
 archiveRun <- FALSE
 
+
+# Sesnitivity Analysis
+SA_method <- "DELSA"
+SA_par_gen_method <- "sobol"
+SA_perturb <- 1.01
+SA_sample_size <- 2
