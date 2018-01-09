@@ -1,5 +1,4 @@
-.libPaths("/glade/u/home/adugger/system/R/Libraries/R3.2.2")
-library(rwrfhydro)
+brary(rwrfhydro)
 library(data.table)
 library(ggplot2)
 library(plyr)
@@ -14,9 +13,9 @@ source("calib_utils.R")
 parallelFlag <- TRUE
 ncores <- 16
 if (parallelFlag && ncores>1) {
-        library(doParallel)
-        cl <- makeForkCluster(ncores)
-        registerDoParallel(cl)
+  library(doParallel)
+  cl <- makeForkCluster(ncores)
+  registerDoParallel(cl)
 }
 
 
@@ -25,9 +24,9 @@ if (parallelFlag && ncores>1) {
 #########################################################
 
 if (file.exists("proj_data_SENS.Rdata")) { 
-   load("proj_data_SENS.Rdata")
+  load("proj_data_SENS.Rdata")
 } else {
-   message("No proj_data_SENS.Rdata file found")
+  message("No proj_data_SENS.Rdata file found")
 }
 
 # Load obs so we have them for next iteration
@@ -44,57 +43,142 @@ linkId <- which(trimws(rtLink$gages) %in% siteId)
 chrt.d.all <- data.table()
 
 for (cyclecount in 1:nrow(x_all)) {
-   # Read model out and calculate performance metric
-   outPath <- paste0(runDir, "/SENS_RESULTS/OUTPUT", cyclecount)
-   print(outPath)
-
-   # Read files
-   message("Reading model out files.")
-   system.time({
-   filesList <- list.files(path = outPath,
-                          pattern = glob2rx("*.CHRTOUT_DOMAIN*"),
-                          full.names = TRUE)
-   filesListDate <- as.POSIXct(unlist(plyr::llply(strsplit(basename(filesList),"[.]"), '[',1)), format = "%Y%m%d%H%M", tz = "UTC")
-   whFiles <- which(filesListDate >= startDate)
-   filesList <- filesList[whFiles]
-   if (length(filesList) == 0) stop("No matching files in specified directory.")
-   chrt <- as.data.table(plyr::ldply(filesList, ReadChFile, linkId, .parallel = parallelFlag))
-   })
-
-   # Convert to daily
-   chrt.d <- Convert2Daily(chrt)
-   chrt.d[, site_no := siteId]
-   # Merge
-   setkey(chrt.d, "site_no", "POSIXct")
-   setkey(obsDT, "site_no", "POSIXct")
-   chrt.d <- merge(chrt.d, obsDT, by=c("site_no", "POSIXct"), all.x=FALSE, all.y=FALSE)
-   chrt.d$id <- cyclecount
-   chrt.d$tag <- x_all$tag[cyclecount]
-   chrt.d.all <- rbindlist(list(chrt.d.all, chrt.d))
-
-   # Assess performance
-   F_new <- objFn(chrt.d$q_cms, chrt.d$obs)
-   statNse <- rwrfhydro::Nse(chrt.d$q_cms, chrt.d$obs)
-   statNseLog <- rwrfhydro::NseLog(chrt.d$q_cms, chrt.d$obs)
-   statCor <- cor(chrt.d$q_cms, chrt.d$obs)
-   statRmse <- rwrfhydro::Rmse(chrt.d$q_cms, chrt.d$obs)
-   statBias <- sum(chrt.d$q_cms - chrt.d$obs, na.rm=TRUE)/sum(chrt.d$obs, na.rm=TRUE) * 100
-   statKge <- Kge(chrt.d$q_cms, chrt.d$obs)
-   chrt.d <- CalcFdc(chrt.d, "q_cms")
-   chrt.d <- CalcFdc(chrt.d, "obs")
-   statFdc <- integrate(splinefun(as.data.frame(chrt.d)[,"q_cms.fdc"], as.data.frame(chrt.d)[,"q_cms"], method='natural'), 0.05, 0.95, subdivisions=1000)$value
-
-   # Archive results
-   x_archive[cyclecount,] <- c(cyclecount, x_all[cyclecount,], F_new, statNse, statNseLog, statCor, statRmse, statBias, statKge, statFdc)
-   print(x_archive[cyclecount,])
-
+  # Read model out and calculate performance metric
+  outPath <- paste0(runDir, "/SENS_RESULTS/OUTPUT", cyclecount)
+  print(outPath)
+  
+  # Read files
+  message("Reading model out files.")
+  system.time({
+    filesList <- list.files(path = outPath,
+                            pattern = glob2rx("*.CHRTOUT_DOMAIN*"),
+                            full.names = TRUE)
+    filesListDate <- as.POSIXct(unlist(plyr::llply(strsplit(basename(filesList),"[.]"), '[',1)), format = "%Y%m%d%H%M", tz = "UTC")
+    whFiles <- which(filesListDate >= startDate)
+    filesList <- filesList[whFiles]
+    if (length(filesList) == 0) stop("No matching files in specified directory.")
+    chrt <- as.data.table(plyr::ldply(filesList, ReadChFile, linkId, .parallel = parallelFlag))
+  })
+  
+  # Convert to daily
+  chrt.d <- Convert2Daily(chrt)
+  chrt.d[, site_no := siteId]
+  # Merge
+  setkey(chrt.d, "site_no", "Date")
+  setkey(obsDT, "site_no", "Date")
+  chrt.d <- merge(chrt.d, obsDT, by=c("site_no", "Date"), all.x=FALSE, all.y=FALSE)
+  chrt.d$id <- cyclecount
+  chrt.d$tag <- x_all$tag[cyclecount]
+  chrt.d.all <- rbindlist(list(chrt.d.all, chrt.d))
+  
+  # Assess performance
+  F_new <- objFn(chrt.d$q_cms, chrt.d$obs)
+  statNse <- rwrfhydro::Nse(chrt.d$q_cms, chrt.d$obs)
+  statNseLog <- rwrfhydro::NseLog(chrt.d$q_cms, chrt.d$obs)
+  statCor <- cor(chrt.d$q_cms, chrt.d$obs)
+  statRmse <- rwrfhydro::Rmse(chrt.d$q_cms, chrt.d$obs)
+  statBias <- sum(chrt.d$q_cms - chrt.d$obs, na.rm=TRUE)/sum(chrt.d$obs, na.rm=TRUE) * 100
+  statKge <- Kge(chrt.d$q_cms, chrt.d$obs)
+  chrt.d <- CalcFdc(chrt.d, "q_cms")
+  chrt.d <- CalcFdc(chrt.d, "obs")
+  statFdc <- integrate(splinefun(as.data.frame(chrt.d)[,"q_cms.fdc"], as.data.frame(chrt.d)[,"q_cms"], method='natural'), 0.05, 0.95, subdivisions=1000)$value
+  
+  # Archive results
+  x_archive[cyclecount,] <- c(cyclecount, x_all[cyclecount,], F_new, statNse, statNseLog, statCor, statRmse, statBias, statKge, statFdc)
+  print(x_archive[cyclecount,])
+  
 }
 
 # Interim save
 save.image("proj_data_SENS.Rdata")
 
+if (SA_method == "DELSA") {
+  
+  for (metric in metrics)  {
+    x <- list(y = x_archive[, metric], X0 = X0, X = rbind(X0, X), varprior = varprior)
+    
+    id <- deparse(substitute(x))
+    
+    Kpar = ncol(x$X0)
+    Nsamp = nrow(x$X0)
+    vartot = rep(0, Nsamp)
+    delsafirst = deriv = varfir = matrix(NA, ncol = Kpar, nrow = Nsamp)
+    out <- as.numeric(x$y)
+    for (rsamp in 1:Nsamp) {
+      for (jpar in 1:Kpar) {
+        idx.pert = Nsamp * jpar + rsamp
+        deriv[rsamp, jpar] = (out[idx.pert] - out[rsamp])/(x$X[idx.pert,
+                                                               jpar] - x$X[rsamp, jpar])
+        varfir[rsamp, jpar] = (deriv[rsamp, jpar]^2) * (x$varprior[jpar])
+        vartot[rsamp] = vartot[rsamp] + varfir[rsamp, jpar]
+        if (jpar == Kpar) {
+          for (jjpar in 1:Kpar) delsafirst[rsamp, jjpar] = varfir[rsamp,
+                                                                  jjpar]/vartot[rsamp]
+        }
+      }
+    }
+    colnames(delsafirst) = colnames(x$X)
+    x$delsafirst = delsafirst
+    assign(id, x, parent.frame())
+  }
+}
+
+
+# the default plots from the Sensitivity Packages
+writePlotDir <- paste0(runDir, "/plots")
+dir.create(writePlotDir)
+obj = x
+
+#plot1
+temp = as.data.frame(obj$delsafirst)
+names(temp) <-  names(x_all)[2:ncol(x_all)]
+temp$id <- 1:nrow(temp)
+temp = reshape2::melt(temp, id.var = "id")
+gg <- ggplot2::ggplot(data = temp, ggplot2::aes(x = value,
+                                                 colour = variable)) + 
+  ggplot2::stat_ecdf() +
+  ggplot2::scale_x_continuous("DELSA results for first order sensitivity") +
+  ggplot2::scale_y_continuous("Cum. frequency") +
+  ggplot2::labs(title = "CDF of first order sensitivity across parameter space")
+ggsave(filename=paste0(writePlotDir, "/", chrt.d.all$site_no[1], "_CDF_DELSA.png"),
+       plot=gg, units="in", width=16, height=8, dpi=300)
+
+#plot2
+temp$y <- obj$y[temp$id]
+
+temp2 = as.data.frame(obj$X0)
+names(temp2) <-  names(x_all)[2:ncol(x_all)]
+temp2$id <- 1:nrow(temp2)
+temp2 = reshape2::melt(temp2, id.var = "id")
+temp2$x <- temp2$value
+temp2$value <- NULL
+temp = merge(temp, temp2)
+
+gg <- ggplot2::ggplot(data = temp) + ggplot2::geom_point(ggplot2::aes(x = value,
+                                                                       y = y)) + 
+  ggplot2::scale_x_continuous(name = "DELSA first order sensitivity") +
+  ggplot2::scale_y_continuous(name = "Model output") +
+  ggplot2::facet_wrap(~variable, scales = "free") +
+  ggplot2::labs(title = "First order sensitivity as related to model response")
+ggsave(filename=paste0(writePlotDir, "/", chrt.d.all$site_no[1], "_DELSA_model_response.png"),
+       plot=gg, units="in", width=16, height=8, dpi=300)
+
+#plot3
+gg <- ggplot2::ggplot(data = temp) + ggplot2::geom_point(ggplot2::aes(y = value,
+                                                                      x = x, colour = y)) + ggplot2::scale_y_continuous(name = "DELSA first order sensitivity") +
+  ggplot2::scale_x_continuous(name = "Parameter value") +
+  ggplot2::scale_color_continuous(name = "Model response") +
+  ggplot2::facet_wrap(~variable, scales = "free") +
+  ggplot2::labs(title = "First order sensitivity as as related to parameter value")
+ggsave(filename=paste0(writePlotDir, "/", chrt.d.all$site_no[1], "_DELSA_parameter_value.png"),
+       plot=gg, units="in", width=16, height=8, dpi=300)
+
+# Let s do a bootstrap resampling ?!!!!
+
+#>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
 # Summary stats
-for (i in names(x_archive)[18:25]) { x_archive[,i] <- as.numeric(x_archive[,i]) }
+for (i in names(x_archive)[(ncol(x_all)+1):ncol(x_archive)]) { x_archive[,i] <- as.numeric(x_archive[,i]) }
 x_archive$obj.diff <- x_archive$obj - x_archive$obj[1]
 x_archive$nse.diff <- x_archive$nse - x_archive$nse[1]
 x_archive$nselog.diff <- x_archive$nselog - x_archive$nselog[1]
@@ -112,50 +196,56 @@ ggPalette <- gg_color_hue(14)
 plotGroups <- list(soil=c('bexp', 'dksat', 'smcmax', 'refkdt', 'slope', 'RETDEPRTFAC', 'LKSATFAC'),
                    other=c('Zmax', 'Expon', 'CWPVT', 'VCMX25', 'MP', 'HVT', 'MFSNO'))
 
-writePlotDir <- paste0(runDir, "/plots")
-dir.create(writePlotDir)
-
 # Hydrographs
-gg <- ggplot(data=chrt.d.all[tag %in% plotGroups[["soil"]],], aes(x=POSIXct, y=q_cms, color=tag, group=id)) +
-              geom_line(lwd=0.6) +
-              scale_y_log10() +
-              facet_wrap(~ tag) +
-              annotate(geom='line', x=chrt.d.all[tag=="control",]$POSIXct, y=chrt.d.all[tag=="control",]$q_cms, color='black', lwd=0.3) +
-              ggtitle(paste0("Model Sensitivity: ", chrt.d.all$site_no[1]))
-ggsave(filename=paste0(writePlotDir, "/", chrt.d.all$site_no[1], "_soilp_sens.png"),
-              plot=gg, units="in", width=16, height=8, dpi=300)
+gg <- ggplot(data=chrt.d.all) +
+  geom_line(aes(x=Date, y=q_cms, color=id, group=id), lwd=0.6) +
+  geom_point(aes(x=Date, y=obs, group=id), color = "black") + 
+  scale_y_log10() +
+  ggtitle(paste0("Model Sensitivity: ", chrt.d.all$site_no[1]))
+ggsave(filename=paste0(writePlotDir, "/", chrt.d.all$site_no[1], "_hydrograph.png"),
+       plot=gg, units="in", width=16, height=8, dpi=300)
 
-
-gg <- ggplot(data=chrt.d.all[tag %in% plotGroups[["other"]],], aes(x=POSIXct, y=q_cms, color=tag, group=id)) +
-              geom_line(lwd=0.6) +
-              scale_y_log10() +
-              facet_wrap(~ tag) +
-              annotate(geom='line', x=chrt.d.all[tag=="control",]$POSIXct, y=chrt.d.all[tag=="control",]$q_cms, color='black', lwd=0.3) +
-              ggtitle(paste0("Model Sensitivity: ", chrt.d.all$site_no[1]))
-ggsave(filename=paste0(writePlotDir, "/", chrt.d.all$site_no[1], "_otherp_sens.png"),
-              plot=gg, units="in", width=16, height=8, dpi=300)
+# gg <- ggplot(data=chrt.d.all[tag %in% plotGroups[["soil"]],], aes(x=POSIXct, y=q_cms, color=tag, group=id)) +
+#   geom_line(lwd=0.6) +
+#   scale_y_log10() +
+#   facet_wrap(~ tag) +
+#   annotate(geom='line', x=chrt.d.all[tag=="control",]$POSIXct, y=chrt.d.all[tag=="control",]$q_cms, color='black', lwd=0.3) +
+#   ggtitle(paste0("Model Sensitivity: ", chrt.d.all$site_no[1]))
+# ggsave(filename=paste0(writePlotDir, "/", chrt.d.all$site_no[1], "_soilp_sens.png"),
+#        plot=gg, units="in", width=16, height=8, dpi=300)
+# 
+# 
+# gg <- ggplot(data=chrt.d.all[tag %in% plotGroups[["other"]],], aes(x=POSIXct, y=q_cms, color=tag, group=id)) +
+#   geom_line(lwd=0.6) +
+#   scale_y_log10() +
+#   facet_wrap(~ tag) +
+#   annotate(geom='line', x=chrt.d.all[tag=="control",]$POSIXct, y=chrt.d.all[tag=="control",]$q_cms, color='black', lwd=0.3) +
+#   ggtitle(paste0("Model Sensitivity: ", chrt.d.all$site_no[1]))
+# ggsave(filename=paste0(writePlotDir, "/", chrt.d.all$site_no[1], "_otherp_sens.png"),
+#        plot=gg, units="in", width=16, height=8, dpi=300)
 
 # Metric plots
-tmp<-x_archive[,c("tag", metrics)]
-tmp<-melt(tmp, id='tag')
-tmpmax <- ddply(tmp, .(tag, variable), function(x) {max(x$value)})
-tmpmin <- ddply(tmp, .(tag, variable), function(x) {min(x$value)})
-tmpall <- merge(tmpmin, tmpmax, by=c("tag", "variable"))
-names(tmpall)[3:4]<-c("min", "max")
-tmpall <- plyr::join(tmpall, data.frame(tag=unique(tmpall$tag), id=seq(1:length(unique(tmpall$tag)))), by="tag")
-
-gg <- ggplot(data=tmpall, aes(x=tag, fill=tag)) + 
-        geom_rect(aes(x=tag, xmin=id-0.45, xmax=id+0.45, ymin=min, ymax=max, color=tag), alpha=0.8) + 
-        facet_wrap(~variable, scales="free_y") +
-        ggtitle(paste0("Metric Sensitivity: ", chrt.d.all$site_no[1])) +
-        theme(axis.title.x=element_blank(), axis.text.x=element_blank(), axis.ticks.x=element_blank())
-ggsave(filename=paste0(writePlotDir, "/", chrt.d.all$site_no[1], "_metric_sens.png"),
-        plot=gg, units="in", width=16, height=8, dpi=300)
+# tmp<-x_archive[,c("tag", metrics)]
+# tmp<-melt(tmp, id='tag')
+# tmpmax <- ddply(tmp, .(tag, variable), function(x) {max(x$value)})
+# tmpmin <- ddply(tmp, .(tag, variable), function(x) {min(x$value)})
+# tmpall <- merge(tmpmin, tmpmax, by=c("tag", "variable"))
+# names(tmpall)[3:4]<-c("min", "max")
+# tmpall <- plyr::join(tmpall, data.frame(tag=unique(tmpall$tag), id=seq(1:length(unique(tmpall$tag)))), by="tag")
+# 
+# gg <- ggplot(data=tmpall, aes(x=tag, fill=tag)) + 
+#   geom_rect(aes(x=tag, xmin=id-0.45, xmax=id+0.45, ymin=min, ymax=max, color=tag), alpha=0.8) + 
+#   facet_wrap(~variable, scales="free_y") +
+#   ggtitle(paste0("Metric Sensitivity: ", chrt.d.all$site_no[1])) +
+#   theme(axis.title.x=element_blank(), axis.text.x=element_blank(), axis.ticks.x=element_blank())
+# ggsave(filename=paste0(writePlotDir, "/", chrt.d.all$site_no[1], "_metric_sens.png"),
+#        plot=gg, units="in", width=16, height=8, dpi=300)
 
 
 # Save and exit
 if (parallelFlag) stopCluster(cl)
 save.image("proj_data_SENS.Rdata")
 quit("no")
+
 
 
