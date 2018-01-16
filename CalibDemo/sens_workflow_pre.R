@@ -55,6 +55,8 @@ message("Initialize parameter archive")
 x_archive <- as.data.frame(matrix(, nrow=1, ncol=ncol(x_all)+length(metrics)))
 names(x_archive) <- c(names(x_all), metrics)
 
+x_archive_h <- x_archive
+
 # Output parameter set
 message("Output parameter set")
 write.table(x_all, file="params_new.txt", row.names=FALSE, sep=" ")
