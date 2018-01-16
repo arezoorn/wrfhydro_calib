@@ -258,15 +258,18 @@ done < $paramfile
 
 wait
 rundone=0
+NUMOFLINES=$(wc -l < "params_new.txt")
+NUMOFLINES=$[NUMOFLINES-1]
 while [ $rundone -eq 0 ]; do
       outcnt=`ls -d SENS_RESULTS/OUTPUT* | wc -l`
-      if [ "${outcnt}" -eq "29" ]; then
+      if [ "${outcnt}" -eq $NUMOFLINES ]; then
          echo "Run complete!"
          sleep $pausetime
          rundone=1
          exe="R CMD BATCH --no-restore --no-save sens_workflow_post.R"
          jobName=`date +%Y-%m-%d-%H-%M-%S`-$USER
-         bsub -Is -q geyser -W 2:00 -n 16 -P NRAL0017 -J $jobName $exe ; bkill -J $jobName
+       #  bsub -Is -q geyser -W 2:00 -n 16 -P NRAL0017 -J $jobName $exe ; bkill -J $jobName
+	$exe
          mv RUN.CALTMP* SENS_RUNS/.
          cd $startdir
          exit 0
