@@ -1,8 +1,8 @@
-brary(rwrfhydro)
+library(rwrfhydro)
 library(data.table)
 library(ggplot2)
 library(plyr)
-
+library(boot)
 #########################################################
 # SETUP
 #########################################################
@@ -11,7 +11,7 @@ source("calib_utils.R")
 
 # Multi-core
 parallelFlag <- TRUE
-ncores <- 16
+ncores <- 32
 if (parallelFlag && ncores>1) {
   library(doParallel)
   cl <- makeForkCluster(ncores)
@@ -31,8 +31,12 @@ if (file.exists("proj_data_SENS.Rdata")) {
 
 # Load obs so we have them for next iteration
 load(obsFile)
-obsDT$q_cms <- NULL
 obsDT <- obsDT[!is.na(obs),]
+
+# convrt the hourly obs to daily obs
+obsDT$Date <- rwrfhydro::CalcDateTrunc(obsDT$POSIXct)
+setkey(obsDT, Date)
+obsDT.d <- obsDT[, list(obs = mean(obs, na.rm = TRUE)), by = "Date"]
 
 # Find the index of the gage
 rtLink <- ReadRouteLink(rtlinkFile)
@@ -40,7 +44,8 @@ rtLink <- data.table(rtLink)
 linkId <- which(trimws(rtLink$gages) %in% siteId)
 
 # Initialize chrtout
-chrt.d.all <- data.table()
+if (!exists("chrt.d.all")) chrt.d.all <- data.table()
+if (!exists("chrt.h.all")) chrt.h.all <- data.table()
 
 for (cyclecount in 1:nrow(x_all)) {
   # Read model out and calculate performance metric
@@ -59,16 +64,44 @@ for (cyclecount in 1:nrow(x_all)) {
     if (length(filesList) == 0) stop("No matching files in specified directory.")
     chrt <- as.data.table(plyr::ldply(filesList, ReadChFile, linkId, .parallel = parallelFlag))
   })
-  
+
+  # add the chrt data to the chrt.h.all and calculate the stats for the hourly time step
+  chrt[, site_no := siteId]
+  setkey(chrt, "site_no", "POSIXct")
+  setkey(obsDT, "site_no", "POSIXct")
+  chrt.h <- merge(chrt, obsDT, by=c("site_no", "POSIXct"), all.x=FALSE, all.y=FALSE)
+  chrt.h$id <- cyclecount
+# chrt.h$tag <- x_all$tag[cyclecount] We do not have any tag anymore
+  chrt.h.all <- rbindlist(list(chrt.h.all, chrt.h))
+
+  # Assess performance for the hourly flow
+  F_new <- objFn(chrt.h$q_cms, chrt.h$obs)
+  statNse <- rwrfhydro::Nse(chrt.h$q_cms, chrt.h$obs)
+  statNseLog <- rwrfhydro::NseLog(chrt.h$q_cms, chrt.h$obs)
+  statCor <- cor(chrt.h$q_cms, chrt.h$obs)
+  statRmse <- rwrfhydro::Rmse(chrt.h$q_cms, chrt.h$obs)
+  statBias <- sum(chrt.h$q_cms - chrt.h$obs, na.rm=TRUE)/sum(chrt.h$obs, na.rm=TRUE) * 100
+  statKge <- Kge(chrt.h$q_cms, chrt.h$obs)
+  chrt.h <- CalcFdc(chrt.h, "q_cms")
+  chrt.h <- CalcFdc(chrt.h, "obs")
+#  statFdc <- integrate(splinefun(as.data.frame(chrt.h)[,"q_cms.fdc"], as.data.frame(chrt.h)[,"q_cms"], method='natural'), 0.05, 0.95, subdivisions=1000)$value
+  statFdc <- NA
+
+  # Archive results
+  x_archive_h[cyclecount,] <- c(x_all[cyclecount,], F_new, statNse, statNseLog, statCor, statRmse, statBias, statKge, statFdc)
+  print(x_archive_h[cyclecount,])
+
+########################## ####### DAILY CALCULATIONS ###################################################### 
   # Convert to daily
   chrt.d <- Convert2Daily(chrt)
+  obsDT.d[, site_no := siteId]
   chrt.d[, site_no := siteId]
   # Merge
   setkey(chrt.d, "site_no", "Date")
-  setkey(obsDT, "site_no", "Date")
-  chrt.d <- merge(chrt.d, obsDT, by=c("site_no", "Date"), all.x=FALSE, all.y=FALSE)
+  setkey(obsDT.d, "site_no", "Date")
+  chrt.d <- merge(chrt.d, obsDT.d,  by=c("site_no", "Date"), all.x=FALSE, all.y=FALSE)
   chrt.d$id <- cyclecount
-  chrt.d$tag <- x_all$tag[cyclecount]
+# chrt.d$tag <- x_all$tag[cyclecount] We do not have tag here.
   chrt.d.all <- rbindlist(list(chrt.d.all, chrt.d))
   
   # Assess performance
@@ -84,7 +117,7 @@ for (cyclecount in 1:nrow(x_all)) {
   statFdc <- integrate(splinefun(as.data.frame(chrt.d)[,"q_cms.fdc"], as.data.frame(chrt.d)[,"q_cms"], method='natural'), 0.05, 0.95, subdivisions=1000)$value
   
   # Archive results
-  x_archive[cyclecount,] <- c(cyclecount, x_all[cyclecount,], F_new, statNse, statNseLog, statCor, statRmse, statBias, statKge, statFdc)
+  x_archive[cyclecount,] <- c(x_all[cyclecount,], F_new, statNse, statNseLog, statCor, statRmse, statBias, statKge, statFdc)
   print(x_archive[cyclecount,])
   
 }
@@ -92,10 +125,14 @@ for (cyclecount in 1:nrow(x_all)) {
 # Interim save
 save.image("proj_data_SENS.Rdata")
 
+################################ DELSA Calculations for each Metric at both hourly and daily time step
+
 if (SA_method == "DELSA") {
-  
+  delsaFirst <- list()
+  for (timeStep in c("hourly", "daily")) {
   for (metric in metrics)  {
-    x <- list(y = x_archive[, metric], X0 = X0, X = rbind(X0, X), varprior = varprior)
+    if (timeStep == "daily") x <- list(y = x_archive[, metric], X0 = X0, X = rbind(X0, X), varprior = varprior)
+    if (timeStep == "hourly") x <- list(y = x_archive_h[, metric], X0 = X0, X = rbind(X0, X), varprior = varprior)
     
     id <- deparse(substitute(x))
     
@@ -118,8 +155,9 @@ if (SA_method == "DELSA") {
       }
     }
     colnames(delsafirst) = colnames(x$X)
-    x$delsafirst = delsafirst
+    delsaFirst[[timeStep]][[metric]]$delsafirst = delsafirst
     assign(id, x, parent.frame())
+  }
   }
 }
 
@@ -129,8 +167,8 @@ writePlotDir <- paste0(runDir, "/plots")
 dir.create(writePlotDir)
 obj = x
 
-#plot1
-temp = as.data.frame(obj$delsafirst)
+#plot1 # these plots are only provided for the daily timestep and the objective function as the metric
+temp = as.data.frame(delsaFirst$daily$obj$delsafirst)
 names(temp) <-  names(x_all)[2:ncol(x_all)]
 temp$id <- 1:nrow(temp)
 temp = reshape2::melt(temp, id.var = "id")
@@ -165,7 +203,8 @@ ggsave(filename=paste0(writePlotDir, "/", chrt.d.all$site_no[1], "_DELSA_model_r
 
 #plot3
 gg <- ggplot2::ggplot(data = temp) + ggplot2::geom_point(ggplot2::aes(y = value,
-                                                                      x = x, colour = y)) + ggplot2::scale_y_continuous(name = "DELSA first order sensitivity") +
+                                                                      x = x, colour = y)) + 
+  ggplot2::scale_y_continuous(name = "DELSA first order sensitivity") +
   ggplot2::scale_x_continuous(name = "Parameter value") +
   ggplot2::scale_color_continuous(name = "Model response") +
   ggplot2::facet_wrap(~variable, scales = "free") +
@@ -173,20 +212,35 @@ gg <- ggplot2::ggplot(data = temp) + ggplot2::geom_point(ggplot2::aes(y = value,
 ggsave(filename=paste0(writePlotDir, "/", chrt.d.all$site_no[1], "_DELSA_parameter_value.png"),
        plot=gg, units="in", width=16, height=8, dpi=300)
 
-# Let s do a bootstrap resampling ?!!!!
+# Let s do a bootstrap resampling, I want to do this for all the metrics and both temporal resolutions
+Quantile <- function(data, indices, SA_quantileFrac = 0.9) {
+  d <- data[indices] # allow boot to select sample
+  quantileNo <- quantile(d, SA_quantileFrac) #calcualte the quantile
+  return(quantileNo)
+}
+
+bootRes <- data.table()
+for (timeStep in c("hourly", "daily")) {
+   for (metric in setdiff(metrics, "fdc")) {
+       for (param in 1:(ncol(x_all)-1)) {
+            results <- boot(data=delsaFirst[[timeStep]][[metric]]$delsafirst[, param],
+		  statistic=Quantile, 
+                  R=SA_bootstrap_replicates)
+            bootRes <- rbindlist(list(bootRes, data.table(delsaFirst = results$t[,1],
+						     timeStep = timeStep, metric = metric, 
+						     parameter = names(x_all)[param+1])))
+           }
+     }
+}
+
+# add the plots 
+gg <- ggplot(bootRes, aes(parameter, delsaFirst)) + geom_boxplot()+
+	facet_grid(metric~timeStep)+
+        theme(axis.text.x = element_text(angle = 90, hjust = 1))
+ggsave(filename=paste0(writePlotDir, "/", chrt.d.all$site_no[1], "_DELSA_uncertainty_estimate.png"),
+       plot=gg, units="in", width=16, height=8, dpi=300)
 
 #>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-# Summary stats
-for (i in names(x_archive)[(ncol(x_all)+1):ncol(x_archive)]) { x_archive[,i] <- as.numeric(x_archive[,i]) }
-x_archive$obj.diff <- x_archive$obj - x_archive$obj[1]
-x_archive$nse.diff <- x_archive$nse - x_archive$nse[1]
-x_archive$nselog.diff <- x_archive$nselog - x_archive$nselog[1]
-x_archive$cor.diff <- x_archive$cor - x_archive$cor[1]
-x_archive$rmse.diff <- x_archive$rmse - x_archive$rmse[1]
-x_archive$bias.diff <- x_archive$bias - x_archive$bias[1]
-x_archive$kge.diff <- x_archive$kge - x_archive$kge[1]
-x_archive$fdc.diff <- x_archive$fdc - x_archive$fdc[1]
 
 # Summary plots
 
