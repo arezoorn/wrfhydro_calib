@@ -30,6 +30,7 @@ siteId <- "04233300"
 # Must contain an object called obsDf containing columns:
 # "POSIXct" for POSIXct data, "obs" for streamflow data
 obsFile <- paste0(runDir, "/OBS/obsDaily.Rdata")
+obsFile <- paste0(runDir, "/OBS/obsHourly.Rdata")
 
 # Objective function
 # Must contain a function to be minimized, with two arguments (in order): model, obs 
@@ -56,17 +57,19 @@ objFn <- function (m, o, w=0.5, p=1) {  # Negative weighted mean NSE and log NSE
 #}
 
 # Start date for evaluation period (e.g., after spinup period)
-startDate <- as.POSIXct("2008-10-01", format="%Y-%m-%d", tz="UTC")
+startDate <- as.POSIXct("2009-10-01", format="%Y-%m-%d", tz="UTC")
 
 # Archive model run output files?
-archiveOutput <- FALSE
+archiveOutput <- TRUE
 
 # Archive model run files?
-archiveRun <- FALSE
+archiveRun <- TRUE
 
 
 # Sesnitivity Analysis
 SA_method <- "DELSA"
 SA_par_gen_method <- "sobol"
 SA_perturb <- 1.01
-SA_sample_size <- 2
+SA_sample_size <-20
+SA_bootstrap_replicates <- 1000 # Number of replicates for the bootstrap resmaplins
+SA_quantileFrac <- 0.9 # if not provided will use the 0.9 for 90% quantile
